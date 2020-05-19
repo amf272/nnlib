@@ -23,16 +23,20 @@ def add_activation(layers, activation):
     """Adds an activation function into a list of layers."""
     if activation == 'relu':
         layers.append(nn.ReLU(inplace=True))
-    if activation == 'sigmoid':
+    elif activation == 'sigmoid':
         layers.append(nn.Sigmoid())
-    if activation == 'tanh':
+    elif activation == 'tanh':
         layers.append(nn.Tanh())
-    if activation == 'softplus':
+    elif activation == 'softplus':
         layers.append(nn.Softplus())
-    if activation == 'softmax':
+    elif activation == 'softmax':
         layers.append(nn.Softmax(dim=1))
-    if activation == 'linear':
+    elif activation == 'linear':
         pass
+    elif activation == 'prelu':
+        layers.append(nn.PReLU())
+    else:
+        raise NotImplementedError(f"{activation} parser not implemented")
     return layers
 
 
