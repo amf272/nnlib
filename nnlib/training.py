@@ -73,6 +73,10 @@ def run_partition(model, epoch, tensorboard, optimizer, loader, partition, train
         if training:
             optimizer.zero_grad()
 
+        if hasattr(model, 'on_iteration_start'):
+            model.on_iteration_start(batch_data=batch_data, batch_labels=batch_labels,
+                                     partition=partition, tensorboard=tensorboard)
+
         # forward pass
         forward_model = (model if data_parallel_model is None else data_parallel_model)
         torch.set_grad_enabled(training)  # torch.nn.DataParallel uses this when creating copies of model
@@ -96,19 +100,21 @@ def run_partition(model, epoch, tensorboard, optimizer, loader, partition, train
             # update the parameters
             optimizer.step()
 
-        # call on_iteration_end callbacks
-        if hasattr(model, 'on_iteration_end'):
-            model.on_iteration_end(outputs=outputs, batch_losses=batch_losses, batch_labels=batch_labels,
-                                   partition=partition, tensorboard=tensorboard)
-        for metric in metrics:
-            metric.on_iteration_end(outputs=outputs, batch_labels=batch_labels, partition=partition)
-
         # collect all losses
         if len(batch_losses) > 1:
             batch_losses['total'] = batch_total_loss
         for k, v in batch_losses.items():
             losses['{}_{}'.format(partition, k)].append(len(batch_data) * utils.to_numpy(v))
-        total_number_samples += len(batch_data)
+        num_samples = len(batch_data)
+        total_number_samples += num_samples
+
+        # call on_iteration_end callbacks
+        if hasattr(model, 'on_iteration_end'):
+            model.on_iteration_end(outputs=outputs, batch_losses=batch_losses, batch_labels=batch_labels,
+                                   partition=partition, tensorboard=tensorboard)
+        for metric in metrics:
+            metric.on_iteration_end(outputs=outputs, batch_labels=batch_labels, partition=partition,
+                                    batch_losses=batch_losses, epoch=epoch, num_samples=num_samples)
 
     for k, v in losses.items():
         losses[k] = np.sum(v) / total_number_samples

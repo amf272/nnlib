@@ -13,6 +13,9 @@ class Method(torch.nn.Module):
     def on_iteration_end(self, *args, **kwargs):
         pass
 
+    def on_iteration_start(self, *args, **kwargs):
+        pass
+
     def on_epoch_end(self, *args, **kwargs):
         pass
 

@@ -48,7 +48,10 @@ def print_loaded_dataset_shapes(build_datasets_fn):
             print(f"\tval_samples: {len(val_data)}")
         if test_data is not None:
             print(f"\ttest_samples: {len(test_data)}")
-        example_shape = train_data[0][0].shape
+        if isinstance(train_data[0][0], list):
+            example_shape = list(map(lambda x: x.shape, train_data[0][0]))
+        else:
+            example_shape = train_data[0][0].shape
         print(f"\texample_shape: {example_shape}")
         return train_data, val_data, test_data, info
     return wrapper
@@ -230,6 +233,24 @@ class DataSelector:
     def _parse_birds(self, args, build_loaders=True):
         from .birds import Birds
         data_builder = Birds(**args)
+        if build_loaders:
+            return data_builder.build_loaders(**args)
+        else:
+            return data_builder.build_datasets(**args)
+
+    @register_parser(_parsers, 'german')
+    def _parse_german(self, args, build_loaders=True):
+        from .german import German
+        data_builder = German(**args)
+        if build_loaders:
+            return data_builder.build_loaders(**args)
+        else:
+            return data_builder.build_datasets(**args)
+
+    @register_parser(_parsers, 'adult')
+    def _parse_adult(self, args, build_loaders=True):
+        from .adult import Adult
+        data_builder = Adult(**args)
         if build_loaders:
             return data_builder.build_loaders(**args)
         else:
