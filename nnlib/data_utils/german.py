@@ -39,7 +39,6 @@ class GermanDataset(torch.utils.data.Dataset):
         index = (data[:, 6] == 1) | (data[:, 6] == 3) | (data[:, 6] == 4)
         data[:, 6] = (index).astype(int)
 
-        np.random.shuffle(data)
         if train:
             relevant_indices = random_indices[:700]
         else:

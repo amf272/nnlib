@@ -24,7 +24,7 @@ class AdultDataset(StandardDataset):
                       "adult.test": "https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.test",
                       "adult.data": "https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data"}
 
-    def __init__(self, root, label_name='income-per-year',
+    def __init__(self, root, split="train", label_name='income-per-year',
                  favorable_classes=['>50K', '>50K.'],
                  protected_attribute_names=['race', 'sex'],
                  privileged_classes=[['White'], ['Male']],
@@ -35,7 +35,6 @@ class AdultDataset(StandardDataset):
                  features_to_keep=[], features_to_drop=['fnlwgt'],
                  na_values=['?'], custom_preprocessing=None,
                  metadata=default_mappings,
-                 split="train",
                  download=True):
         """See :obj:`StandardDataset` for a description of the arguments.
 

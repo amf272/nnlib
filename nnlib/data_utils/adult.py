@@ -62,7 +62,7 @@ class AdultDataset(torch.utils.data.Dataset):
         target_labels = raw_data[:, 14]
         sensitive_labels = raw_data[:, 9]
 
-        self.features = torch.from_numpy(features)
+        self.features = torch.from_numpy(features).float()
         self.target_labels = torch.from_numpy(target_labels)
         self.sensitive_labels = torch.from_numpy(sensitive_labels)
 

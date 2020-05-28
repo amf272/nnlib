@@ -256,6 +256,24 @@ class DataSelector:
         else:
             return data_builder.build_datasets(**args)
 
+    @register_parser(_parsers, 'compas')
+    def _parse_compas(self, args, build_loaders=True):
+        from .compas import Compas
+        data_builder = Compas(**args)
+        if build_loaders:
+            return data_builder.build_loaders(**args)
+        else:
+            return data_builder.build_datasets(**args)
+
+    @register_parser(_parsers, 'bank')
+    def _parse_bank(self, args, build_loaders=True):
+        from .bank import Bank
+        data_builder = Bank(**args)
+        if build_loaders:
+            return data_builder.build_loaders(**args)
+        else:
+            return data_builder.build_datasets(**args)
+
     def can_parse(self, dataset_name):
         return dataset_name in self._parsers
 
