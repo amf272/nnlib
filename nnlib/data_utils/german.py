@@ -1,7 +1,8 @@
 import os
 
-import torch.utils.data
 import torch
+import torch.utils.data
+from torchvision.datasets.utils import download_url
 import numpy as np
 
 from .abstract import StandardVisionDataset
@@ -10,19 +11,25 @@ from .base import print_loaded_dataset_shapes, log_call_parameters
 
 class GermanDataset(torch.utils.data.Dataset):
 
+    base_folder = "german"
+
+    relevant_files = ["german.data-numeric",
+                      'random_indices.txt']
+
     # define train/test indices
     def __init__(self, root, train: bool = True, transform=None, target_transform=None, download: bool = False,):
         super(GermanDataset, self).__init__()
-        assert os.path.exists(root), f"root directory {root} does not exist"
+        assert transform is None and target_transform is None, "transforms not implemented"
 
-        # TODO put this stuff into parsing function
-        data_file = os.path.join(root, "german.data-numeric")
-        assert os.path.exists(data_file), f"for now manually download {data_file}"
-        assert transform is None and target_transform is None and not download, "download, and transforms not there"
+        self.root = root
+        self.base_dir = os.path.join(self.root, self.base_folder, 'raw')
+        data_file = os.path.join(self.base_dir, "german.data-numeric")
+        if download:
+            self.download()
 
         data = np.loadtxt(data_file)
 
-        random_indices_file = os.path.join(root, "random_indices.txt")
+        random_indices_file = os.path.join(self.base_dir, "random_indices.txt")
 
         num_entries, num_features = data.shape
         if not os.path.exists(random_indices_file):
@@ -47,6 +54,17 @@ class GermanDataset(torch.utils.data.Dataset):
         self.features = torch.from_numpy(np.concatenate((data[relevant_indices, 0:8], data[relevant_indices, 9:24]), axis=1)).float()
         self.target_labels = torch.from_numpy(data[relevant_indices, 24]).long()
         self.sensitive_labels = torch.from_numpy(data[relevant_indices, 6]).long()
+
+    def download(self):
+        if not os.path.exists(self.base_dir):
+            os.makedirs(self.base_dir)
+        download_url("https://raw.githubusercontent.com/human-analysis/MaxEnt-ARL/master/data/german/german.data-numeric",
+                     self.base_dir)
+
+    def _check_integrity(self):
+        if not os.path.exists(os.path.join(self.base_dir, "german.data-numeric")):
+            return False
+        return True
 
     def __len__(self):
         return self.features.shape[0]
@@ -82,5 +100,5 @@ class German(StandardVisionDataset):
         return []
 
     def raw_dataset(self, data_dir: str, download: bool, train: bool, transform):
-        return GermanDataset(data_dir, download=False, train=train)
+        return GermanDataset(data_dir, download=download, train=train)
 
