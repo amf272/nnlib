@@ -27,7 +27,7 @@ class HealthDataset(torch.utils.data.Dataset):
                       'random_indices.txt']
 
     # define train/test indices
-    def __init__(self, root, train: bool = True, transform=None, target_transform=None, download: bool = False, ):
+    def __init__(self, root, train: bool = True, pct_train=0.8, transform=None, target_transform=None, download: bool = False, ):
         super(HealthDataset, self).__init__()
         assert transform is None and target_transform is None, "transforms not implemented"
 
@@ -81,10 +81,12 @@ class HealthDataset(torch.utils.data.Dataset):
         else:
             random_indices = np.loadtxt(random_indices_file, dtype=int)
 
+        split_location = int(pct_train * len(random_indices))
+
         if train:
-            relevant_indices = random_indices[:700]
+            relevant_indices = random_indices[:split_location]
         else:
-            relevant_indices = random_indices[700:]
+            relevant_indices = random_indices[split_location:]
 
         self.features = torch.from_numpy(features[relevant_indices]).float()
         self.target_labels = torch.from_numpy(target_labels[relevant_indices]).long()
