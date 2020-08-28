@@ -81,21 +81,11 @@ class HealthDataset(torch.utils.data.Dataset):
             np.savetxt(fname=random_indices_file, X=random_indices, fmt="%d")
         else:
             random_indices = np.loadtxt(random_indices_file, dtype=int)
-<<<<<<< HEAD
         num_train_indices = int(len(random_indices)*pct_train)
         if train:
             relevant_indices = random_indices[:num_train_indices]
         else:
             relevant_indices = random_indices[num_train_indices:]
-=======
-
-        split_location = int(pct_train * len(random_indices))
-
-        if train:
-            relevant_indices = random_indices[:split_location]
-        else:
-            relevant_indices = random_indices[split_location:]
->>>>>>> 2a666bbb01ad74c76335591b05ef2d9b5f0aa81f
 
         self.features = torch.from_numpy(features[relevant_indices]).float()
         self.target_labels = torch.from_numpy(target_labels[relevant_indices]).long()

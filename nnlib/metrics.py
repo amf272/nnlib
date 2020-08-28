@@ -118,6 +118,37 @@ class AUROC(Metric):
         batch_labels = utils.to_numpy(batch_labels[self.label_index]).astype(np.int)
         self._storage[partition].append((batch_labels, pred))
 
+#
+# class DemographicParityDifference(Metric):
+#     def __init__(self, output_key: str = 'pred', label_index=0, **kwargs):
+#         super(DemographicParityDifference, self).__init__(**kwargs)
+#         self.output_key = output_key
+#         self.label_index = label_index
+#
+#         # initialize and use later
+#         self._storage = defaultdict(list)
+#         self._metric = defaultdict(dict)
+#
+#     @property
+#     def name(self):
+#         return "demographic parity difference"
+#
+#     def value(self, epoch, partition, **kwargs):
+#         return self._metric[partition].get(epoch, None)
+#
+#     def on_epoch_start(self, partition, **kwargs):
+#         self._storage[partition] = []
+#
+#     def on_epoch_end(self, partition, tensorboard, epoch, **kwargs):
+#         accuracy = np.concatenate(self._storage[partition])
+#         self._metric[partition][epoch] = accuracy
+#         tensorboard.add_scalar(f"metrics/{partition}_{self.name}_{self.output_key}_{self.label_index}", accuracy, epoch)
+#
+#     def on_iteration_end(self, outputs, batch_labels, partition, **kwargs):
+#         pred = utils.to_numpy(outputs[self.output_key]).argmax(axis=1).astype(np.int)
+#         batch_labels = utils.to_numpy(batch_labels[self.label_index]).astype(np.int)
+#         self._storage[partition].append((batch_labels, pred))
+
 
 class TopKAccuracy(Metric):
     def __init__(self, k, output_key: str = 'pred', label_index=0, **kwargs):
