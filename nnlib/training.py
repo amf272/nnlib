@@ -2,6 +2,8 @@ from collections import defaultdict
 import os
 import pickle
 import time
+import copy
+import logging
 
 from torch.utils.tensorboard import SummaryWriter
 from torch import optim
@@ -26,6 +28,7 @@ def add_weight_decay(named_params, weight_decay_rate):
 
 
 def build_optimizer(named_params, optimization_args):
+    optimization_args = copy.deepcopy(optimization_args)  # as we are modifying it below
     args = optimization_args['optimizer']
 
     # add weight decay if needed
@@ -39,20 +42,34 @@ def build_optimizer(named_params, optimization_args):
     name = args.pop('name', 'adam')
     if name == 'adam':
         optimizer = optim.Adam(params, **args)
-    if name == 'sgd':
+    elif name == 'sgd':
         optimizer = optim.SGD(params, **args)
+    else:
+        raise ValueError(f"Optimizer with name '{name}' is not supported")
     return optimizer
 
 
 def build_scheduler(optimizer, optimization_args):
     args = optimization_args.get('scheduler', {})
-    step_size = args.get('step_size', 1)
-    gamma = args.get('gamma', 1.0)
-    return optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
+    name = args.get('name', 'StepLR')
+    scheduler = None
+    if name == 'StepLR':
+        step_size = args.get('step_size', 1)
+        gamma = args.get('gamma', 1.0)
+        print(f"Using StepLR scheduler with step_size={step_size} and gamma={gamma}")
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
+    elif name == 'MultiStepLR':
+        milestones = args.get('milestones', [])
+        gamma = args.get('gamma', 1.0)
+        print(f"Using MultiStepLR scheduler with milestones={milestones} and gamma={gamma}")
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=gamma)
+    else:
+        raise ValueError(f"Scheduler with name '{name}' is not supported")
+    return scheduler
 
 
 def run_partition(model, epoch, tensorboard, optimizer, loader, partition, training, metrics,
-                  data_parallel_model=None):
+                  data_parallel_model=None, num_accumulation_steps=1):
     # call on_epoch_start callbacks
     if hasattr(model, 'on_epoch_start'):
         model.on_epoch_start(epoch=epoch, tensorboard=tensorboard, partition=partition, loader=loader)
@@ -60,7 +77,9 @@ def run_partition(model, epoch, tensorboard, optimizer, loader, partition, train
         metric.on_epoch_start(epoch=epoch, partition=partition)
 
     losses = defaultdict(list)
-    total_number_samples = 0
+    total_number_of_samples = 0
+    current_step_idx = 0
+    current_total_number_of_samples = 0
 
     for (batch_data, batch_labels) in tqdm(loader, desc='{} batches'.format(partition)):
         # make the input and labels lists
@@ -69,8 +88,12 @@ def run_partition(model, epoch, tensorboard, optimizer, loader, partition, train
         if isinstance(batch_labels, torch.Tensor):
             batch_labels = [batch_labels]
 
+        # compute actual batch size
+        actual_batch_size = len(batch_data[0])
+
         # zero gradients in training phase
-        if training:
+        if training and current_step_idx == 0:
+            current_total_number_of_samples = 0
             optimizer.zero_grad()
 
         if hasattr(model, 'on_iteration_start'):
@@ -79,51 +102,77 @@ def run_partition(model, epoch, tensorboard, optimizer, loader, partition, train
 
         # forward pass
         forward_model = (model if data_parallel_model is None else data_parallel_model)
-        torch.set_grad_enabled(training)  # torch.nn.DataParallel uses this when creating copies of model
-        outputs = forward_model.forward(inputs=batch_data, labels=batch_labels,
-                                        grad_enabled=training, loader=loader, dataset=loader.dataset, epoch=epoch)
+        with torch.set_grad_enabled(training):
+            outputs = forward_model.forward(inputs=batch_data, labels=batch_labels, partition=partition,
+                                            grad_enabled=training, loader=loader, dataset=loader.dataset,
+                                            epoch=epoch)
 
-        batch_losses, outputs = model.compute_loss(inputs=batch_data, labels=batch_labels, outputs=outputs,
-                                                   grad_enabled=training, loader=loader, dataset=loader.dataset,
-                                                   epoch=epoch)
-        batch_total_loss = sum([loss for name, loss in batch_losses.items()])
+            batch_losses, outputs = model.compute_loss(inputs=batch_data, labels=batch_labels, outputs=outputs,
+                                                       grad_enabled=training, loader=loader, dataset=loader.dataset,
+                                                       epoch=epoch, partition=partition)
+            batch_total_loss = sum([loss for name, loss in batch_losses.items()])
+            batch_total_loss_adjusted = batch_total_loss * actual_batch_size
+            current_total_number_of_samples += actual_batch_size
 
         if training:
             # backward pass
-            batch_total_loss.backward()
-
-            # some models might need to do something before applying gradients (e.g. clipping or adding noise)
-            # TODO: if data parallelism is on, each model should call its before_weight_update
-            if hasattr(model, 'before_weight_update'):
-                model.before_weight_update()
+            batch_total_loss_adjusted.backward()
 
             # update the parameters
-            optimizer.step()
+            if current_step_idx == num_accumulation_steps - 1:
+                # adjust the weight of gradients
+                for v in model.parameters():
+                    if v.requires_grad:
+                        v.grad /= current_total_number_of_samples
+
+                # some models might need to do something before applying gradients (e.g. clipping or adding noise)
+                # TODO: if data parallelism is on, each model should call its before_weight_update
+                if hasattr(model, 'before_weight_update'):
+                    model.before_weight_update()
+
+                optimizer.step()
 
         # collect all losses
         if len(batch_losses) > 1:
             batch_losses['total'] = batch_total_loss
         for k, v in batch_losses.items():
-            losses['{}_{}'.format(partition, k)].append(len(batch_data) * utils.to_numpy(v))
-        num_samples = len(batch_data)
-        total_number_samples += num_samples
+        num_samples = actual_batch_size
 
         # call on_iteration_end callbacks
         if hasattr(model, 'on_iteration_end'):
             model.on_iteration_end(outputs=outputs, batch_losses=batch_losses, batch_labels=batch_labels,
                                    partition=partition, tensorboard=tensorboard)
         for metric in metrics:
-            metric.on_iteration_end(outputs=outputs, batch_labels=batch_labels, partition=partition,
-                                    batch_losses=batch_losses, epoch=epoch, num_samples=num_samples)
+            if hasattr(metric, 'on_iteration_end'):
+                metric.on_iteration_end(outputs=outputs, batch_labels=batch_labels, partition=partition,
+                                        batch_losses=batch_losses, epoch=epoch, num_samples=num_samples)
+            losses['{}_{}'.format(partition, k)].append(actual_batch_size * utils.to_numpy(v))
+        total_number_of_samples += actual_batch_size
+
+        # update the step counter
+        current_step_idx = (current_step_idx + 1) % num_accumulation_steps
 
     for k, v in losses.items():
-        losses[k] = np.sum(v) / total_number_samples
+        losses[k] = np.sum(v) / total_number_of_samples
         tensorboard.add_scalar('losses/{}'.format(k), losses[k], epoch)
+
+    # if some gradient is left to apply
+    if training and current_step_idx > 0:
+        logging.warning('The number of training steps in one epoch is not a multiple of '
+                        'number of accumulation steps')
+        # adjust the weight of gradients
+        for v in model.parameters():
+            if v.requires_grad:
+                v.grad /= current_total_number_of_samples
+
+        if hasattr(model, 'before_weight_update'):
+            model.before_weight_update()
+
+        optimizer.step()
 
     # call on_epoch_end callbacks
     if hasattr(model, 'on_epoch_end'):
-        model.on_epoch_end(epoch=epoch, tensorboard=tensorboard, partition=partition,
-                           loader=loader)
+        model.on_epoch_end(epoch=epoch, tensorboard=tensorboard, partition=partition, loader=loader)
     for metric in metrics:
         metric.on_epoch_end(epoch=epoch, tensorboard=tensorboard, partition=partition)
 
@@ -139,12 +188,15 @@ def make_markdown_table_from_dict(params_dict):
 
 def train(model, train_loader, val_loader, epochs, save_iter=10, vis_iter=4,
           optimization_args=None, log_dir=None, args_to_log=None, metrics=None,
-          callbacks=None, stopper=None, device_ids=None):
+          callbacks=None, stopper=None, device_ids=None, num_accumulation_steps=1):
     """ Trains the model. Validation loader can be None.
     Assumptions:
     1. loaders return (batch_inputs, batch_labels), where both can be lists or torch.Tensors
     2. models are inheriting from method_utils.Method.
     3. callback and metrics are inheriting from their abstract classes described in callbacks.py and metrics.py
+
+    :param num_accumulation_steps: an integer that tells how many step gradients should be averaged before
+                                   updating the parameters.
     """
 
     # print the architecture of the model, helps to notice mistakes
@@ -169,9 +221,10 @@ def train(model, train_loader, val_loader, epochs, save_iter=10, vis_iter=4,
     print("Visualize logs using: tensorboard --logdir={0}".format(log_dir))
 
     # add args_to_log to tensorboard, but also store it separately for easier access
-    tensorboard.add_text('script arguments table', make_markdown_table_from_dict(vars(args_to_log)))
-    with open(os.path.join(log_dir, 'args.pkl'), 'wb') as f:
-        pickle.dump(args_to_log, f)
+    if args_to_log is not None:
+        tensorboard.add_text('script arguments table', make_markdown_table_from_dict(vars(args_to_log)))
+        with open(os.path.join(log_dir, 'args.pkl'), 'wb') as f:
+            pickle.dump(args_to_log, f)
 
     optimizer = build_optimizer(model.named_parameters(), optimization_args)
     scheduler = build_scheduler(optimizer, optimization_args)
@@ -194,7 +247,8 @@ def train(model, train_loader, val_loader, epochs, save_iter=10, vis_iter=4,
             data_parallel_model.train()
         train_losses = run_partition(model=model, epoch=epoch, tensorboard=tensorboard, optimizer=optimizer,
                                      loader=train_loader, partition='train', training=True, metrics=metrics,
-                                     data_parallel_model=data_parallel_model)
+                                     data_parallel_model=data_parallel_model,
+                                     num_accumulation_steps=num_accumulation_steps)
 
         val_losses = {}
         if val_loader is not None:
@@ -203,7 +257,8 @@ def train(model, train_loader, val_loader, epochs, save_iter=10, vis_iter=4,
                 data_parallel_model.eval()
             val_losses = run_partition(model=model, epoch=epoch, tensorboard=tensorboard, optimizer=optimizer,
                                        loader=val_loader, partition='val', training=False, metrics=metrics,
-                                       data_parallel_model=data_parallel_model)
+                                       data_parallel_model=data_parallel_model,
+                                       num_accumulation_steps=1)
 
         # log some statistics
         t = time.time()

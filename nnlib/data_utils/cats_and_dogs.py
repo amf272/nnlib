@@ -1,20 +1,24 @@
+import os
+import logging
+logging.basicConfig(level=logging.INFO)
+
 from torchvision import transforms
+from torchvision.datasets import ImageFolder
 import torch
 
 from .base import log_call_parameters
 from .abstract import StandardVisionDataset
-from .torch_extensions import birds
 
 
-class Birds(StandardVisionDataset):
+class CatsAndDogs(StandardVisionDataset):
     @log_call_parameters
     def __init__(self, data_augmentation: bool = False, **kwargs):
-        super(Birds, self).__init__(**kwargs)
+        super(CatsAndDogs, self).__init__(**kwargs)
         self.data_augmentation = data_augmentation
 
     @property
     def dataset_name(self) -> str:
-        return "birds"
+        return "cats-and-dogs"
 
     @property
     def means(self):
@@ -47,6 +51,10 @@ class Birds(StandardVisionDataset):
 
     def raw_dataset(self, data_dir: str, download: bool, split: str, transform):
         assert split in ['train', 'val', 'test']
-        if split == 'val':
-            return None  # no predetermined validation set
-        return birds.Birds(data_dir, train=(split == 'train'), download=download, transform=transform)
+        if split == 'train':
+            return ImageFolder(os.path.join(data_dir, 'PetImages'), transform=transform)
+        if split == 'test':
+            logging.warning("The cats and dogs dataset has only training set. "
+                            "Instead of a testing set the training set will be returned.")
+            return ImageFolder(os.path.join(data_dir, 'PetImages'), transform=transform)
+        return None  # no predetermined validation set

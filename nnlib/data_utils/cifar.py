@@ -8,6 +8,8 @@ from .base import log_call_parameters
 from .abstract import StandardVisionDataset
 from .noise_tools import get_uniform_error_corruption_fn, get_corruption_function_from_confusion_matrix
 
+cifar10_classes = ['airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
+
 
 class CIFAR(StandardVisionDataset):
     @log_call_parameters
@@ -49,11 +51,16 @@ class CIFAR(StandardVisionDataset):
             self.normalize_transform
         ])
 
-    def raw_dataset(self, data_dir: str, download: bool, train: bool, transform):
+    def raw_dataset(self, data_dir: str, download: bool, split: str, transform):
+        assert split in ['train', 'val', 'test']
+        if split == 'val':
+            return None  # no predetermined validation set
         if self.n_classes == 10:
-            return datasets.CIFAR10(data_dir, download=download, train=train, transform=transform)
+            return datasets.CIFAR10(data_dir, download=download, train=(split == 'train'),
+                                    transform=transform)
         if self.n_classes == 100:
-            return datasets.CIFAR100(data_dir, download=download, train=train, transform=transform)
+            return datasets.CIFAR100(data_dir, download=download, train=(split == 'train'),
+                                     transform=transform)
         raise ValueError("num_classes should be 10 or 100")
 
 

@@ -9,12 +9,10 @@ import os
 from sklearn.manifold import TSNE
 import numpy as np
 import torch
-import matplotlib
-matplotlib.use('agg', warn=False)
-from matplotlib import pyplot
 
 from . import utils
 from .data_utils.base import revert_normalization
+from .matplotlib_utils import import_matplotlib
 
 
 def get_image(x):
@@ -36,7 +34,7 @@ def reconstruction_plot(model, train_data, val_data, n_samples=5, plt=None):
     """Plots reconstruction examples for training & validation sets."""
     model.eval()
     if plt is None:
-        plt = pyplot
+        _, plt = import_matplotlib(agg=True, use_style=False)
     train_samples = [train_data[i][0] for i in range(n_samples)]
     val_samples = [val_data[i][0] for i in range(n_samples)]
     samples = torch.stack(train_samples + val_samples, dim=0)
@@ -51,14 +49,14 @@ def reconstruction_plot(model, train_data, val_data, n_samples=5, plt=None):
         ax[i][0].set_axis_off()
         ax[i][1].imshow(get_image(x_rec[i]), vmin=0, vmax=1)
         ax[i][1].set_axis_off()
-    return fig, plt
+    return fig, ax
 
 
 def manifold_plot(model, example_shape, low=-1.0, high=+1.0, n_points=20, d1=0, d2=1, plt=None):
     """Plots reconstruction for varying dimensions d1 and d2, while the remaining dimensions are kept fixed."""
     model.eval()
     if plt is None:
-        plt = pyplot
+        _, plt = import_matplotlib(agg=True, use_style=False)
     image = np.zeros((example_shape[0], n_points * example_shape[1], n_points * example_shape[2]), dtype=np.float32)
 
     z = np.random.uniform(low=low, high=high, size=(model.hidden_shape[-1],))
@@ -85,14 +83,14 @@ def manifold_plot(model, example_shape, low=-1.0, high=+1.0, n_points=20, d1=0, 
     ax.axis('off')
     ax.set_ylabel('z_{}'.format(d1))
     ax.set_xlabel('z_{}'.format(d2))
-    return fig, plt
+    return fig, ax
 
 
 def latent_scatter(model, data_loader, d1=0, d2=1, plt=None):
     """A scatter plot of latent factors on some 2-d subspace, with points colored according to test labels."""
     model.eval()
     if plt is None:
-        plt = matplotlib.pyplot
+        _, plt = import_matplotlib(agg=True, use_style=False)
     tab = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
            'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
     z = []
@@ -133,14 +131,14 @@ def latent_scatter(model, data_loader, d1=0, d2=1, plt=None):
     ax.set_xlim(L[d1], R[d1])
     ax.set_ylim(L[d2], R[d2])
     ax.set_title('Latent space')
-    return fig, plt
+    return fig, ax
 
 
 def latent_space_tsne(model, data_loader, plt=None):
     """A scatter plot of latent factors on some 2-d subspace, with points colored according to test labels."""
     model.eval()
     if plt is None:
-        plt = matplotlib.pyplot
+        _, plt = import_matplotlib(agg=True, use_style=False)
     tab = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
            'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
     z = []
@@ -182,12 +180,12 @@ def latent_space_tsne(model, data_loader, plt=None):
     ax.set_xlim(L[0], R[0])
     ax.set_ylim(L[1], R[1])
     ax.set_title('Latent space TSNE plot')
-    return fig, plt
+    return fig, ax
 
 
 def plot_predictions(model, data_loader, key, plt=None, n_examples=10):
     if plt is None:
-        plt = matplotlib.pyplot
+        _, plt = import_matplotlib(agg=True, use_style=False)
     model.eval()
 
     pred = utils.apply_on_dataset(model=model, dataset=data_loader.dataset,
@@ -212,6 +210,79 @@ def plot_predictions(model, data_loader, key, plt=None, n_examples=10):
         ax[i][1].bar(range(model.num_classes), probs[i])
         ax[i][1].set_xticks(range(model.num_classes))
 
-    return fig, plt
+    return fig, ax
 
 
+def plot_images(images, n_rows=None, n_cols=None, titles=None, one_image_size=None, savename=None, plt=None):
+    """
+    :param images: list of images of from (W, H, 3). Values should be in [0, 1]. Use get_image function
+                           above to convert to this format.
+    """
+    if plt is None:
+        _, plt = import_matplotlib(agg=True, use_style=False)
+    n_images = len(images)
+
+    # decide number of rows and columns
+    if (n_rows is None) and (n_cols is None):
+        i = 1
+        while i * i <= n_images:
+            if n_images % i == 0:
+                n_rows = i
+            i += 1
+        n_cols = n_images // n_rows
+    elif n_cols is None:
+        n_cols = 1
+        while n_rows * n_cols < n_images:
+            n_cols += 1
+    elif n_rows is None:
+        n_rows = 1
+        while n_rows * n_cols < n_images:
+            n_rows += 1
+
+    # determine one image size
+    if one_image_size is None:
+        one_image_size = (2, 2)
+    if isinstance(one_image_size, int):
+        one_image_size = (one_image_size, one_image_size)
+
+    fig, ax = plt.subplots(nrows=n_rows, ncols=n_cols, squeeze=False,
+                           figsize=(n_cols * one_image_size[0], n_rows * one_image_size[1]))
+    for i in range(n_images):
+        row_idx = i // n_cols
+        col_idx = i % n_cols
+        cax = ax[row_idx][col_idx]
+        cax.imshow(images[i], vmin=0, vmax=1)
+        cax.set_axis_off()
+        if titles is not None:
+            cax.set_title(titles[i])
+
+    fig.tight_layout()
+
+    if savename is not None:
+        savefig(fig, savename)
+
+    return fig, ax
+
+
+def plot_examples_from_dataset(data, indices, n_rows=None, n_cols=None, one_image_size=None, savename=None, plt=None,
+                               is_label_one_hot=False, skip_titles=False, label_names=None, **kwargs):
+    n = len(indices)
+    images = []
+    titles = []
+    for i in range(n):
+        x, y = data[indices[i]]
+        if is_label_one_hot:
+            y = torch.argmax(y)
+        if isinstance(y, torch.Tensor) and y.ndim == 0:
+            y = y.item()
+        x = revert_normalization(x, data)[0]
+        x = utils.to_numpy(x)
+        images.append(get_image(x))
+        if label_names is None:
+            titles.append(f'class {y}')
+        else:
+            titles.append(label_names[y])
+    if skip_titles:
+        titles = None
+    return plot_images(images=images, n_rows=n_rows, n_cols=n_cols, titles=titles,
+                       one_image_size=one_image_size, savename=savename, plt=plt)

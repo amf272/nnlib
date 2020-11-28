@@ -1,20 +1,19 @@
-from torchvision import transforms
+from torchvision import transforms, datasets
 import torch
 
 from .base import log_call_parameters
 from .abstract import StandardVisionDataset
-from .torch_extensions import birds
 
 
-class Birds(StandardVisionDataset):
+class SVHN(StandardVisionDataset):
     @log_call_parameters
     def __init__(self, data_augmentation: bool = False, **kwargs):
-        super(Birds, self).__init__(**kwargs)
+        super(SVHN, self).__init__(**kwargs)
         self.data_augmentation = data_augmentation
 
     @property
     def dataset_name(self) -> str:
-        return "birds"
+        return "svhn"
 
     @property
     def means(self):
@@ -28,25 +27,19 @@ class Birds(StandardVisionDataset):
     def train_transforms(self):
         if not self.data_augmentation:
             return self.test_transforms
-
-        return transforms.Compose([
-            transforms.RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            self.normalize_transform,
-        ])
+        return transforms.Compose([transforms.RandomCrop(32, 4),
+                                   transforms.ToTensor(),
+                                   self.normalize_transform])
 
     @property
     def test_transforms(self):
         return transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
             transforms.ToTensor(),
-            self.normalize_transform,
+            self.normalize_transform
         ])
 
     def raw_dataset(self, data_dir: str, download: bool, split: str, transform):
         assert split in ['train', 'val', 'test']
         if split == 'val':
             return None  # no predetermined validation set
-        return birds.Birds(data_dir, train=(split == 'train'), download=download, transform=transform)
+        return datasets.SVHN(data_dir, download=download, split=split, transform=transform)

@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
+from sklearn.metrics import roc_auc_score
 import numpy as np
+import torch
 
 from . import utils
 
@@ -30,10 +32,17 @@ class Metric(ABC):
 
 
 class Accuracy(Metric):
-    def __init__(self, output_key: str = 'pred', label_index=0, **kwargs):
+    """ Accuracy metric. Works in both binary and multiclass classification settings.
+    """
+    def __init__(self, output_key: str = 'pred', threshold=0.5, one_hot=False, **kwargs):
+        """
+        :param threshold: in the case of binary classification what threshold to use
+        :param one_hot: whether the labels is in one-hot encoding
+        """
         super(Accuracy, self).__init__(**kwargs)
         self.output_key = output_key
-        self.label_index = label_index
+        self.threshold = threshold
+        self.one_hot = one_hot
 
         # initialize and use later
         self._accuracy_storage = defaultdict(list)
@@ -55,99 +64,90 @@ class Accuracy(Metric):
         tensorboard.add_scalar(f"metrics/{partition}_{self.name}_{self.output_key}_{self.label_index}", accuracy, epoch)
 
     def on_iteration_end(self, outputs, batch_labels, partition, **kwargs):
-        pred = utils.to_numpy(outputs[self.output_key]).argmax(axis=1).astype(np.int)
-        batch_labels = utils.to_numpy(batch_labels[self.label_index]).astype(np.int)
+        out = outputs[self.output_key]
+        if out.shape[-1] > 1:
+            # multiple class
+            pred = utils.to_numpy(out).argmax(axis=1).astype(np.int)
+        else:
+            # binary classification
+            pred = utils.to_numpy(out.squeeze(dim=-1) > self.threshold).astype(np.int)
+        batch_labels = utils.to_numpy(batch_labels[0]).astype(np.int)
+        if self.one_hot:
+            batch_labels = np.argmax(batch_labels, axis=1)
+        else:
+            batch_labels = batch_labels.reshape(pred.shape)
         self._accuracy_storage[partition].append((pred == batch_labels).astype(np.float).mean())
 
 
-class Loss(Metric):
-    def __init__(self, **kwargs):
-        super(Loss, self).__init__(**kwargs)
-        self._value = defaultdict(lambda: defaultdict(float))
-        self._num_samples = defaultdict(lambda: defaultdict(float))
-
-    @property
-    def name(self):
-        return "loss"
-
-    def value(self, epoch, partition, **kwargs):
-        return self._value[partition].get(epoch, None) / self._num_samples[partition].get(epoch, None)
-
-    def on_epoch_start(self, partition, **kwargs):
-        pass
-
-    def on_epoch_end(self, partition, tensorboard, epoch, **kwargs):
-        tensorboard.add_scalar(f"metrics/{partition}_{self.name}", self.value(epoch, partition), epoch)
-
-    def on_iteration_end(self, outputs, batch_labels, partition, batch_losses, epoch, num_samples, **kwargs):
-        total_loss = sum(batch_losses.values())
-        self._value[partition][epoch] += total_loss * num_samples
-        self._num_samples[partition][epoch] += num_samples
-
-
-# TODO implement this
-# TODO also implement sklearn metric recording
-class AUROC(Metric):
-    def __init__(self, output_key: str = 'pred', label_index=0, **kwargs):
-        super(AUROC, self).__init__(**kwargs)
+class MulticlassScalarAccuracy(Metric):
+    """ Accuracy metric in case when the output is a single scalar, while num_classes > 2.
+    """
+    def __init__(self, output_key: str = 'pred', **kwargs):
+        super(MulticlassScalarAccuracy, self).__init__(**kwargs)
         self.output_key = output_key
-        self.label_index = label_index
 
         # initialize and use later
-        self._storage = defaultdict(list)
-        self._metric = defaultdict(dict)
-        raise NotImplementedError("auroc is not yet correctly implemented")
+        self._accuracy_storage = defaultdict(list)
+        self._accuracy = defaultdict(dict)
 
     @property
     def name(self):
-        return "auroc"
+        return "accuracy"
 
     def value(self, epoch, partition, **kwargs):
-        return self._metric[partition].get(epoch, None)
+        return self._accuracy[partition].get(epoch, None)
 
     def on_epoch_start(self, partition, **kwargs):
-        self._storage[partition] = []
+        self._accuracy_storage[partition] = []
 
     def on_epoch_end(self, partition, tensorboard, epoch, **kwargs):
-        accuracy = np.concatenate(self._storage[partition])
-        self._metric[partition][epoch] = accuracy
-        tensorboard.add_scalar(f"metrics/{partition}_{self.name}_{self.output_key}_{self.label_index}", accuracy, epoch)
+        accuracy = np.mean(self._accuracy_storage[partition])
+        self._accuracy[partition][epoch] = accuracy
+        tensorboard.add_scalar(f"metrics/{partition}_{self.name}", accuracy, epoch)
 
     def on_iteration_end(self, outputs, batch_labels, partition, **kwargs):
-        pred = utils.to_numpy(outputs[self.output_key]).argmax(axis=1).astype(np.int)
-        batch_labels = utils.to_numpy(batch_labels[self.label_index]).astype(np.int)
-        self._storage[partition].append((batch_labels, pred))
+        out = outputs[self.output_key]
+        assert out.shape[-1] == 1
+        pred = utils.to_numpy(torch.round(out)).astype(np.int)
+        batch_labels = utils.to_numpy(batch_labels[0]).astype(np.int).reshape(pred.shape)
+        self._accuracy_storage[partition].append((pred == batch_labels).astype(np.float).mean())
 
-#
-# class DemographicParityDifference(Metric):
-#     def __init__(self, output_key: str = 'pred', label_index=0, **kwargs):
-#         super(DemographicParityDifference, self).__init__(**kwargs)
-#         self.output_key = output_key
-#         self.label_index = label_index
-#
-#         # initialize and use later
-#         self._storage = defaultdict(list)
-#         self._metric = defaultdict(dict)
-#
-#     @property
-#     def name(self):
-#         return "demographic parity difference"
-#
-#     def value(self, epoch, partition, **kwargs):
-#         return self._metric[partition].get(epoch, None)
-#
-#     def on_epoch_start(self, partition, **kwargs):
-#         self._storage[partition] = []
-#
-#     def on_epoch_end(self, partition, tensorboard, epoch, **kwargs):
-#         accuracy = np.concatenate(self._storage[partition])
-#         self._metric[partition][epoch] = accuracy
-#         tensorboard.add_scalar(f"metrics/{partition}_{self.name}_{self.output_key}_{self.label_index}", accuracy, epoch)
-#
-#     def on_iteration_end(self, outputs, batch_labels, partition, **kwargs):
-#         pred = utils.to_numpy(outputs[self.output_key]).argmax(axis=1).astype(np.int)
-#         batch_labels = utils.to_numpy(batch_labels[self.label_index]).astype(np.int)
-#         self._storage[partition].append((batch_labels, pred))
+
+class ROCAUC(Metric):
+    """ ROC AUC for binary classification setting.
+    """
+    def __init__(self, output_key: str = 'pred', **kwargs):
+        super(ROCAUC, self).__init__(**kwargs)
+        self.output_key = output_key
+
+        # initialize and use later
+        self._score_storage = defaultdict(list)
+        self._label_storage = defaultdict(list)
+        self._auc = defaultdict(dict)
+
+    @property
+    def name(self):
+        return "ROC AUC"
+
+    def value(self, epoch, partition, **kwargs):
+        return self._auc[partition].get(epoch, None)
+
+    def on_epoch_start(self, partition, **kwargs):
+        self._score_storage[partition] = []
+        self._label_storage[partition] = []
+
+    def on_epoch_end(self, partition, tensorboard, epoch, **kwargs):
+        labels = torch.cat(self._label_storage[partition], dim=0)
+        scores = torch.cat(self._score_storage[partition], dim=0)
+        auc = roc_auc_score(y_true=utils.to_numpy(labels), y_score=utils.to_numpy(scores))
+        self._auc[partition][epoch] = auc
+        tensorboard.add_scalar(f"metrics/{partition}_{self.name}", auc, epoch)
+
+    def on_iteration_end(self, outputs, batch_labels, partition, **kwargs):
+        pred = outputs[self.output_key]
+        assert pred.shape[-1] == 1
+        self._score_storage[partition].append(pred.squeeze(dim=-1))
+        self._label_storage[partition].append(batch_labels[0])
 
 
 class TopKAccuracy(Metric):

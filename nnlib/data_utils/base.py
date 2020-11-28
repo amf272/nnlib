@@ -29,14 +29,30 @@ def revert_normalization(samples, dataset):
             means.unsqueeze(dim=0).unsqueeze(dim=2).unsqueeze(dim=3))
 
 
-def get_loaders_from_datasets(train_data, val_data, test_data, batch_size=128, num_workers=4, drop_last=False):
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True,
+def get_loaders_from_datasets(train_data, val_data=None, test_data=None, batch_size=128,
+                              num_workers=4, drop_last=False, shuffle_train=True, **kwargs):
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=shuffle_train,
                               num_workers=num_workers, drop_last=drop_last)
-    val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False,
-                            num_workers=num_workers, drop_last=drop_last)
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False,
-                             num_workers=num_workers, drop_last=drop_last)
+    if val_data is not None:
+        val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False,
+                                num_workers=num_workers, drop_last=drop_last)
+    else:
+        val_loader = None
+
+    if test_data is not None:
+        test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False,
+                                 num_workers=num_workers, drop_last=drop_last)
+    else:
+        test_loader = None
+
     return train_loader, val_loader, test_loader
+
+
+def get_input_shape(train_data):
+    example_inputs = train_data[0][0]
+    if isinstance(example_inputs, (list, tuple)):
+        return example_inputs[0].shape
+    return example_inputs.shape
 
 
 def print_loaded_dataset_shapes(build_datasets_fn):
@@ -48,11 +64,7 @@ def print_loaded_dataset_shapes(build_datasets_fn):
             print(f"\tval_samples: {len(val_data)}")
         if test_data is not None:
             print(f"\ttest_samples: {len(test_data)}")
-        if isinstance(train_data[0][0], list):
-            example_shape = list(map(lambda x: x.shape, train_data[0][0]))
-        else:
-            example_shape = train_data[0][0].shape
-        print(f"\texample_shape: {example_shape}")
+        print(f"\texample_shape: {get_input_shape(train_data)}")
         return train_data, val_data, test_data, info
     return wrapper
 
@@ -242,6 +254,11 @@ class DataSelector:
     def _parse_german(self, args, build_loaders=True):
         from .german import German
         data_builder = German(**args)
+        
+    @register_parser(_parsers, 'celeba')
+    def _parse_celeba(self, args, build_loaders=True):
+        from .celeba import CelebA
+        data_builder = CelebA(**args)
         if build_loaders:
             return data_builder.build_loaders(**args)
         else:
@@ -251,6 +268,11 @@ class DataSelector:
     def _parse_adult(self, args, build_loaders=True):
         from .adult import Adult
         data_builder = Adult(**args)
+        
+    @register_parser(_parsers, 'svhn')
+    def _parse_svhn(self, args, build_loaders=True):
+        from .svhn import SVHN
+        data_builder = SVHN(**args)
         if build_loaders:
             return data_builder.build_loaders(**args)
         else:
@@ -260,6 +282,11 @@ class DataSelector:
     def _parse_compas(self, args, build_loaders=True):
         from .compas import Compas
         data_builder = Compas(**args)
+        
+    @register_parser(_parsers, 'emnist')
+    def _parse_emnist(self, args, build_loaders=True):
+        from .emnist import EMNIST
+        data_builder = EMNIST(**args)
         if build_loaders:
             return data_builder.build_loaders(**args)
         else:
@@ -269,6 +296,11 @@ class DataSelector:
     def _parse_bank(self, args, build_loaders=True):
         from .bank import Bank
         data_builder = Bank(**args)
+        
+    @register_parser(_parsers, 'cats-and-dogs')
+    def _parse_cats_and_dogs(self, args, build_loaders=True):
+        from .cats_and_dogs import CatsAndDogs
+        data_builder = CatsAndDogs(**args)
         if build_loaders:
             return data_builder.build_loaders(**args)
         else:
@@ -278,6 +310,20 @@ class DataSelector:
     def _parse_health(self, args, build_loaders=True):
         from .health import Health
         data_builder = Health(**args)
+        
+    @register_parser(_parsers, 'cassava')
+    def _parse_icassava(self, args, build_loaders=True):
+        from .cassava import Cassava
+        data_builder = Cassava(**args)
+        if build_loaders:
+            return data_builder.build_loaders(**args)
+        else:
+            return data_builder.build_datasets(**args)
+
+    @register_parser(_parsers, 'oxford-flowers-102')
+    def _parse_oxford_flowers_102(self, args, build_loaders=True):
+        from .oxford_flowers_102 import OxfordFlowers102
+        data_builder = OxfordFlowers102(**args)
         if build_loaders:
             return data_builder.build_loaders(**args)
         else:

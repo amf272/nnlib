@@ -2,10 +2,13 @@ from collections import defaultdict
 import os
 import re
 import inspect
+import copy
+import time
 
 from torch.utils.data import Subset, DataLoader
 from tqdm import tqdm
 import torch
+import numpy as np
 
 
 def make_path(path):
@@ -14,6 +17,8 @@ def make_path(path):
 
 
 def to_numpy(x):
+    if isinstance(x, np.ndarray):
+        return x
     if x.requires_grad:
         x = x.detach()
     if x.device.type != 'cpu':
@@ -23,10 +28,8 @@ def to_numpy(x):
 
 def to_tensor(x, device='cpu', dtype=torch.float):
     if isinstance(x, torch.Tensor):
-        x = x.to(device)
-    else:
-        x = torch.tensor(x, dtype=dtype, device=device)
-    return x
+        return x.to(device)
+    return torch.tensor(x, dtype=dtype, device=device)
 
 
 def to_cpu(x):
@@ -43,6 +46,19 @@ def set_requires_grad(model, value):
 def zero_grad(model):
     for param in model.parameters():
         param.grad = torch.zeros_like(param)
+
+
+def get_num_parameters(model):
+    n_params = 0
+    for p in model.parameters():
+        n_params += p.nelement()
+    return n_params
+
+
+def put_always_eval_mode(model):
+    model.eval()
+    model._old_train = model.train
+    model.train = (lambda mode=False: model._old_train(False))
 
 
 def save(model, path, optimizer=None, scheduler=None):
@@ -84,6 +100,16 @@ def load(path, methods, device=None, verbose=False, update_args_dict=None):
     return model
 
 
+def with_no_grad(init_fn):
+    def wrapper(*args, **kwargs):
+        with torch.no_grad():
+            ret = init_fn(*args, **kwargs)
+        return ret
+
+    return wrapper
+
+
+@with_no_grad
 def apply_on_dataset(model, dataset, batch_size=256, cpu=True, description="",
                      output_keys_regexp='.*', max_num_examples=2**30,
                      num_workers=0, **kwargs):
@@ -154,3 +180,52 @@ def capture_arguments_of_init(init_fn):
         self.args = argument_dict
 
     return wrapper
+
+
+def atoi(text):
+    if text.isdigit():
+        return int(text)
+    else:
+        return text
+
+
+def natural_keys(text):
+    return [atoi(c) for c in re.split(r'(\d+)', text)]
+
+
+def get_first_k_states(model_dir, k=8):
+    saved_models = os.listdir(os.path.join(model_dir, 'checkpoints'))
+    saved_models = filter(lambda x: x.find("epoch") != -1, saved_models)
+    saved_models = sorted(saved_models, key=natural_keys)
+    return saved_models[:k]
+
+
+class SetTemporaryParams(object):
+    def __init__(self, model, params):
+        self.model = model
+        self.params = params
+        self.original_params = copy.deepcopy(dict(model.named_parameters()))
+
+    def __enter__(self):
+        with torch.no_grad():
+            for k, v in self.model.named_parameters():
+                v.data = self.params[k].data
+        return self.model
+
+    def __exit__(self, type, value, traceback):
+        with torch.no_grad():
+            for k, v in self.model.named_parameters():
+                v.data = self.original_params[k].data
+
+
+class Timing(object):
+    def __init__(self, description):
+        self.description = description
+
+    def __enter__(self):
+        print(self.description, '...')
+        self._start_time = time.time()
+
+    def __exit__(self, type, value, traceback):
+        end_time = time.time()
+        print(f'[{self.description}] time={end_time - self._start_time:.1f}s')

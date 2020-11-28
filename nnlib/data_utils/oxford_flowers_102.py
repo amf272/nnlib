@@ -3,18 +3,18 @@ import torch
 
 from .base import log_call_parameters
 from .abstract import StandardVisionDataset
-from .torch_extensions import birds
+from .torch_extensions import oxford_flowers_102
 
 
-class Birds(StandardVisionDataset):
+class OxfordFlowers102(StandardVisionDataset):
     @log_call_parameters
     def __init__(self, data_augmentation: bool = False, **kwargs):
-        super(Birds, self).__init__(**kwargs)
+        super(OxfordFlowers102, self).__init__(**kwargs)
         self.data_augmentation = data_augmentation
 
     @property
     def dataset_name(self) -> str:
-        return "birds"
+        return "oxford-flowers-102"
 
     @property
     def means(self):
@@ -47,6 +47,5 @@ class Birds(StandardVisionDataset):
 
     def raw_dataset(self, data_dir: str, download: bool, split: str, transform):
         assert split in ['train', 'val', 'test']
-        if split == 'val':
-            return None  # no predetermined validation set
-        return birds.Birds(data_dir, train=(split == 'train'), download=download, transform=transform)
+        return oxford_flowers_102.OxfordFlowers102(data_dir, split=split,
+                                                   download=download, transform=transform)

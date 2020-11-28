@@ -3,6 +3,9 @@ from torch import nn
 import torch
 import numpy as np
 
+from .networks.conditional_distributions import ConditionalGaussian, ConditionalUniform, \
+    ConditionalDiracDelta
+
 
 def infer_shape(layers, input_shape, key=None):
     """Given a list of layers representing a sequential model and its input_shape, infers the output shape."""
@@ -18,7 +21,8 @@ def infer_shape(layers, input_shape, key=None):
     output_shape[0] = None
     return output_shape
 
-
+# TODO must be a better way to get these activations than mapping strings
+# or at least validating the config file
 def add_activation(layers, activation):
     """Adds an activation function into a list of layers."""
     if activation == 'relu':
@@ -31,12 +35,14 @@ def add_activation(layers, activation):
         layers.append(nn.Softplus())
     elif activation == 'softmax':
         layers.append(nn.Softmax(dim=1))
-    elif activation == 'linear':
-        pass
     elif activation == 'prelu':
         layers.append(nn.PReLU())
+    elif activation == 'leaky-relu0.1':
+        layers.append(nn.LeakyReLU(negative_slope=0.1))
+    elif activation == 'linear':
+        pass
     else:
-        raise NotImplementedError(f"{activation} parser not implemented")
+        raise ValueError(f"Activation function with name '{activation}' is not implemented.")
     return layers
 
 
@@ -60,6 +66,12 @@ class Identity(nn.Module):
 
     def forward(self, x):
         return x
+
+
+def group_norm_partial_apply_fn(num_groups=32):
+    def fn(num_channels):
+        return nn.GroupNorm(num_groups=num_groups, num_channels=num_channels)
+    return fn
 
 
 def parse_feed_forward(args, input_shape):
@@ -123,6 +135,33 @@ def parse_feed_forward(args, input_shape):
                 scale_factor=cur_layer['scale_factor']
             ))
 
+        if layer_type == 'gaussian':
+            # this has to be the last layer
+            net = nn.Sequential(*net)
+            output_shape = infer_shape(net, input_shape)
+            mu = nn.Sequential(nn.Linear(output_shape[1], cur_layer['dim']))
+            logvar = nn.Sequential(nn.Linear(output_shape[1], cur_layer['dim']))
+            output_shape = [None, cur_layer['dim']]
+            print("output.shape:", output_shape)
+            return ConditionalGaussian(net, mu, logvar), output_shape
+
+        if layer_type == 'uniform':
+            # this has to be the last layer
+            net = nn.Sequential(*net)
+            output_shape = infer_shape(net, input_shape)
+            center = nn.Sequential(nn.Linear(output_shape[1], cur_layer['dim']))
+            radius = nn.Sequential(nn.Linear(output_shape[1], cur_layer['dim']))
+            output_shape = [None, cur_layer['dim']]
+            print("output.shape:", output_shape)
+            return ConditionalUniform(net, center, radius), output_shape
+
+        if layer_type == 'dirac':
+            # this has to be the last layer
+            net = nn.Sequential(*net)
+            output_shape = infer_shape(net, input_shape)
+            print("output.shape:", output_shape)
+            return ConditionalDiracDelta(net), output_shape
+
     output_shape = infer_shape(net, input_shape)
     print("output.shape:", output_shape)
     return nn.Sequential(*net), output_shape
@@ -133,16 +172,67 @@ def parse_network_from_config(args, input_shape):
 
     # parse standard cases
     if isinstance(args, dict):
-        if args['net'] == 'resnet34':
-            from torchvision.models import resnet34
-            net = resnet34()
+        if args['net'] in ['resnet18', 'resnet34', 'resnet50']:
+            from torchvision.models import resnet18, resnet34, resnet50
+
+            resnet_fn = None
+            if args['net'] == 'resnet18':
+                resnet_fn = resnet18
+            if args['net'] == 'resnet34':
+                resnet_fn = resnet34
+            if args['net'] == 'resnet50':
+                resnet_fn = resnet50
+
+            norm_layer = torch.nn.BatchNorm2d
+            if args.get('norm_layer', '') == 'GroupNorm':
+                norm_layer = group_norm_partial_apply_fn(num_groups=32)
+            if args.get('norm_layer', '') == 'none':
+                norm_layer = (lambda num_channels: Identity())
+
+            num_classes = args.get('num_classes', 1000)
+            pretrained = args.get('pretrained', False)
+
+            # if pretraining is enabled but number of classes is not 1000 replace the last layer
+            if pretrained and num_classes != 1000:
+                net = resnet_fn(norm_layer=norm_layer, num_classes=1000, pretrained=pretrained)
+                net.fc = nn.Linear(net.fc.in_features, num_classes)
+            else:
+                net = resnet_fn(norm_layer=norm_layer, num_classes=num_classes, pretrained=pretrained)
             output_shape = infer_shape([net], input_shape)
             print("output.shape:", output_shape)
             return net, output_shape
 
-        if args['net'] == 'resnet34-cifar':
-            from .networks.resnet_cifar import resnet34
-            net = resnet34(num_classes=args['num_classes'])
+        if args['net'] in ['resnet18-cifar', 'resnet34-cifar']:
+            from .networks.resnet_cifar import resnet18, resnet34
+
+            resnet_fn = None
+            if args['net'] == 'resnet18-cifar':
+                resnet_fn = resnet18
+            if args['net'] == 'resnet34-cifar':
+                resnet_fn = resnet34
+
+            norm_layer = torch.nn.BatchNorm2d
+            if args.get('norm_layer', '') == 'GroupNorm':
+                norm_layer = group_norm_partial_apply_fn(num_groups=32)
+            if args.get('norm_layer', '') == 'none':
+                norm_layer = (lambda num_channels: Identity())
+            net = resnet_fn(num_classes=args['num_classes'], norm_layer=norm_layer)
+            output_shape = infer_shape([net], input_shape)
+            print("output.shape:", output_shape)
+            return net, output_shape
+
+        if args['net'] in ['densenet121']:
+            from torchvision.models import densenet121
+
+            num_classes = args.get('num_classes', 1000)
+            pretrained = args.get('pretrained', False)
+
+            # if pretraining is enabled but number of classes is not 1000 replace the last layer
+            if pretrained and num_classes != 1000:
+                net = densenet121(num_classes=1000, pretrained=pretrained)
+                net.classifier = nn.Linear(net.classifier.in_features, num_classes)
+            else:
+                net = densenet121(num_classes=num_classes, pretrained=pretrained)
             output_shape = infer_shape([net], input_shape)
             print("output.shape:", output_shape)
             return net, output_shape
