@@ -135,7 +135,6 @@ def run_partition(model, epoch, tensorboard, optimizer, loader, partition, train
         # collect all losses
         if len(batch_losses) > 1:
             batch_losses['total'] = batch_total_loss
-        for k, v in batch_losses.items():
         num_samples = actual_batch_size
 
         # call on_iteration_end callbacks
